@@ -36,9 +36,10 @@ func (r *bookingsRepo) GetByID(ctx context.Context, id string) (repo.Booking, er
 
 func (r *bookingsRepo) ListByUser(ctx context.Context, params repo.ListBookingsByUserParams) ([]repo.Booking, error) {
 	baseSQL := `
-		SELECT id, slot_id, user_id, status, conference_link, created_at
-		FROM bookings
-		WHERE user_id = $1
+		SELECT b.id, b.slot_id, b.user_id, b.status, b.conference_link, b.created_at
+		FROM bookings b
+		JOIN slots s ON s.id = b.slot_id
+		WHERE b.user_id = $1
 	`
 
 	var (
@@ -47,9 +48,9 @@ func (r *bookingsRepo) ListByUser(ctx context.Context, params repo.ListBookingsB
 	)
 
 	if params.From != nil {
-		rows, err = r.queries.query(ctx, baseSQL+` AND created_at >= $2 ORDER BY created_at ASC, id ASC`, params.UserID, params.From.UTC())
+		rows, err = r.queries.query(ctx, baseSQL+` AND s.start_at >= $2 ORDER BY s.start_at ASC, b.id ASC`, params.UserID, params.From.UTC())
 	} else {
-		rows, err = r.queries.query(ctx, baseSQL+` ORDER BY created_at ASC, id ASC`, params.UserID)
+		rows, err = r.queries.query(ctx, baseSQL+` ORDER BY s.start_at ASC, b.id ASC`, params.UserID)
 	}
 	if err != nil {
 		return nil, err
