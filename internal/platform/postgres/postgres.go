@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	repopostgres "room-booking-service-go/internal/repo/postgres"
 	"room-booking-service-go/internal/config"
 )
 
@@ -34,4 +35,8 @@ func NewPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+func NewStore(pool *pgxpool.Pool) repopostgres.Store {
+	return repopostgres.NewStore(pool)
 }
