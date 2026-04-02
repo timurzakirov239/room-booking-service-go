@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"room-booking-service-go/internal/api/httpx"
+	"room-booking-service-go/internal/app"
 	"room-booking-service-go/internal/config"
+	platformauth "room-booking-service-go/internal/platform/auth"
 	"room-booking-service-go/internal/platform/postgres"
 	"room-booking-service-go/internal/platform/timeutil"
 )
@@ -40,12 +42,32 @@ func run(ctx context.Context, args []string) error {
 		return runMigrations(ctx, cfg, args)
 	}
 
+	store := postgres.NewStore(pool)
+	authSigner := platformauth.Signer{
+		Secret:   cfg.JWTSecret,
+		Issuer:   cfg.JWTIssuer,
+		Lifetime: 24 * time.Hour,
+		Now:      timeutil.NowUTC,
+	}
+
+	bookingService := app.BookingService{
+		Users:    store.Users,
+		Slots:    store.Slots,
+		Bookings: store.Bookings,
+		Now:      timeutil.NowUTC,
+	}
+	materializer := app.SlotMaterializer{Slots: store.Slots}
+
 	handler := httpx.NewRouter(httpx.RouterDependencies{
-		BuildVersion: buildVersion,
-		Now:          timeutil.NowUTC,
+		BuildVersion:   buildVersion,
+		Now:            timeutil.NowUTC,
 		DBPing: func(ctx context.Context) error {
 			return pool.Ping(ctx)
 		},
+		AuthSigner:     authSigner,
+		Store:          store,
+		BookingService: bookingService,
+		Materializer:   materializer,
 	})
 
 	server := &http.Server{
