@@ -50,6 +50,7 @@ func run(ctx context.Context, args []string) error {
 		Now:      timeutil.NowUTC,
 	}
 
+	roomService := app.RoomService{Rooms: store.Rooms}
 	bookingService := app.BookingService{
 		Users:    store.Users,
 		Slots:    store.Slots,
@@ -66,6 +67,7 @@ func run(ctx context.Context, args []string) error {
 		},
 		AuthSigner:     authSigner,
 		Store:          store,
+		RoomService:    roomService,
 		BookingService: bookingService,
 		Materializer:   materializer,
 	})

@@ -27,6 +27,22 @@ type CreateBookingInput struct {
 	ConferenceLink *string
 }
 
+func (s BookingService) ListMy(ctx context.Context, actor Actor) ([]repo.Booking, error) {
+	if actor.Role != domain.RoleUser {
+		return nil, domain.ErrUserRoleNotAllowed
+	}
+
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+
+	return s.Bookings.ListByUser(ctx, repo.ListBookingsByUserParams{
+		UserID: actor.UserID,
+		From:   &now,
+	})
+}
+
 type CancelBookingInput struct {
 	Actor     Actor
 	BookingID string

@@ -15,6 +15,7 @@ type RouterDependencies struct {
 	DBPing         func(context.Context) error
 	AuthSigner     platformauth.Signer
 	Store          postgres.Store
+	RoomService    app.RoomService
 	BookingService app.BookingService
 	Materializer   app.SlotMaterializer
 }

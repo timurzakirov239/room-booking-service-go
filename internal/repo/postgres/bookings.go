@@ -17,7 +17,11 @@ func (r *bookingsRepo) Create(ctx context.Context, params repo.CreateBookingPara
 		RETURNING id, slot_id, user_id, status, conference_link, created_at
 	`, params.SlotID, params.UserID, params.Status, params.ConferenceLink)
 
-	return scanBooking(row)
+	item, err := scanBooking(row)
+	if err != nil {
+		return repo.Booking{}, err
+	}
+	return item, nil
 }
 
 func (r *bookingsRepo) GetByID(ctx context.Context, id string) (repo.Booking, error) {

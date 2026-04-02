@@ -28,14 +28,14 @@ func NewRouter(deps RouterDependencies) http.Handler {
 
 	authMiddleware := authx.Middleware{Signer: deps.AuthSigner}
 
-	mux.Handle("GET /rooms/list", authMiddleware.RequireAuth(EndpointScaffold{Resource: "rooms", Action: "list"}.Handler()))
-	mux.Handle("POST /rooms/create", authMiddleware.RequireRole(domain.RoleAdmin, EndpointScaffold{Resource: "rooms", Action: "create"}.Handler()))
+	mux.Handle("GET /rooms/list", authMiddleware.RequireAuth(handleRoomsList(deps)))
+	mux.Handle("POST /rooms/create", authMiddleware.RequireRole(domain.RoleAdmin, handleRoomsCreate(deps)))
 	mux.Handle("POST /rooms/{roomId}/schedule/create", authMiddleware.RequireRole(domain.RoleAdmin, EndpointScaffold{Resource: "schedules", Action: "create"}.Handler()))
 	mux.Handle("GET /rooms/{roomId}/slots/list", authMiddleware.RequireAuth(EndpointScaffold{Resource: "slots", Action: "list"}.Handler()))
-	mux.Handle("POST /bookings/create", authMiddleware.RequireRole(domain.RoleUser, EndpointScaffold{Resource: "bookings", Action: "create"}.Handler()))
+	mux.Handle("POST /bookings/create", authMiddleware.RequireRole(domain.RoleUser, handleBookingsCreate(deps)))
 	mux.Handle("GET /bookings/list", authMiddleware.RequireRole(domain.RoleAdmin, EndpointScaffold{Resource: "bookings", Action: "list"}.Handler()))
-	mux.Handle("GET /bookings/my", authMiddleware.RequireRole(domain.RoleUser, EndpointScaffold{Resource: "bookings", Action: "my"}.Handler()))
-	mux.Handle("POST /bookings/{bookingId}/cancel", authMiddleware.RequireRole(domain.RoleUser, EndpointScaffold{Resource: "bookings", Action: "cancel"}.Handler()))
+	mux.Handle("GET /bookings/my", authMiddleware.RequireRole(domain.RoleUser, handleBookingsMy(deps)))
+	mux.Handle("POST /bookings/{bookingId}/cancel", authMiddleware.RequireRole(domain.RoleUser, handleBookingsCancel(deps)))
 
 	return mux
 }

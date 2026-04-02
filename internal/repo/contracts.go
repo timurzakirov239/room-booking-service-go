@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("repo: not found")
+var (
+	ErrNotFound = errors.New("repo: not found")
+	ErrConflict = errors.New("repo: conflict")
+)
 
 type User struct {
 	ID           string

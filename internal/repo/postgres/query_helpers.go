@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -36,6 +37,13 @@ func (q queryRunner) query(ctx context.Context, sql string, args ...any) (rowsSc
 func normalizeError(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return repo.ErrNotFound
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23505" {
+			return repo.ErrConflict
+		}
 	}
 
 	return err
