@@ -22,45 +22,64 @@
 - router/handler wiring;
 - router-level tests/scenario coverage для текущей формы приложения.
 
-На 2026-04-02 в этом runtime уже подтверждено:
+На 2026-04-02 подтверждено следующее:
 - `go mod tidy` проходит;
 - `go test ./...` проходит;
 - `go build ./...` проходит;
-- `docker compose config` проходит.
+- `docker compose config` проходит;
+- `docker compose up --build -d` проходит;
+- `GET /_info` отвечает `200 OK`;
+- живой end-to-end сценарий проходит: `dummyLogin -> rooms/create -> schedule/create -> slots/list -> bookings/create -> bookings/my -> bookings/list -> cancel`.
 
-Неподтверждённой остаётся только живая DB-backed runtime validation (`docker compose up --build` / `curl /_info`), потому что текущий runtime не имеет доступа к Docker daemon socket.
+Итого: это уже рабочий backend-сервис, с которым можно взаимодействовать как с HTTP API.
 
-## Явный путь запуска
-Предполагаемый локальный run path в нормальном Go/Docker runtime:
+## Как поднять сервис
 
 ### Вариант 1: через Docker Compose
+Самый простой путь:
+
 ```bash
-docker compose up --build
+cd /home/timur/.openclaw/workspace/projects/room-booking-service-go
+docker compose up --build -d
 ```
 
-Ожидаемое поведение:
-- PostgreSQL поднимается из `docker-compose.yml`;
-- приложение слушает `:8080`;
-- `GET /_info` должен отвечать `200 OK`.
+Проверка, что всё поднялось:
 
-Проверка:
 ```bash
-curl http://localhost:8080/_info
+docker compose ps
+curl http://127.0.0.1:8080/_info
+```
+
+Ожидаемый ответ на `/_info`:
+```json
+{"status":"ok","service":"room-booking-service-go","databaseOk":true}
+```
+
+Остановить сервис:
+
+```bash
+docker compose down
 ```
 
 ### Вариант 2: локально через Go
-1. Подготовить PostgreSQL и переменные окружения.
-2. Запустить приложение:
+Если хочешь запускать без Docker для приложения, но с отдельным PostgreSQL:
+
 ```bash
+cd /home/timur/.openclaw/workspace/projects/room-booking-service-go
+export DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/room_booking?sslmode=disable'
+export DATABASE_MAX_CONNS=4
+export HTTP_PORT=8080
+export JWT_SECRET='dev-secret-change-me'
+export JWT_ISSUER='room-booking-service-go'
+export AUTO_MIGRATE=true
 go run ./cmd/api
 ```
 
-Минимально важные env-переменные:
-- `DATABASE_URL`
-- `DATABASE_MAX_CONNS`
-- `HTTP_PORT` (по умолчанию `8080`)
-- `JWT_SECRET`
-- `JWT_ISSUER`
+Потом в другом терминале:
+
+```bash
+curl http://127.0.0.1:8080/_info
+```
 
 ### Make targets
 ```bash
@@ -68,8 +87,122 @@ make build
 make test
 make run
 make migrate-up
-make migrate-down
 ```
+
+`migrate-down` сейчас не реализован как полноценный rollback-путь и не должен считаться production-ready функцией.
+
+## Как с ним взаимодействовать
+Это backend HTTP API. С ним работают обычными HTTP-запросами.
+
+Базовый адрес локально:
+
+```text
+http://127.0.0.1:8080
+```
+
+### Базовая логика ролей
+- `admin` — создаёт переговорки и расписания, может смотреть общий список броней;
+- `user` — смотрит переговорки и слоты, создаёт свои брони и отменяет свои брони.
+
+### Минимальный сценарий использования
+1. получить токен `admin`;
+2. получить токен `user`;
+3. создать переговорку;
+4. создать расписание для комнаты;
+5. получить список слотов на дату;
+6. создать бронь на слот;
+7. посмотреть свои брони;
+8. при необходимости отменить бронь.
+
+### Примеры запросов
+
+#### 1. Проверка здоровья
+```bash
+curl http://127.0.0.1:8080/_info
+```
+
+#### 2. Получить тестовый токен администратора
+```bash
+curl -X POST http://127.0.0.1:8080/dummyLogin \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"admin"}'
+```
+
+#### 3. Получить тестовый токен пользователя
+```bash
+curl -X POST http://127.0.0.1:8080/dummyLogin \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"user"}'
+```
+
+Оба запроса возвращают JSON с полем `token`.
+
+#### 4. Создать комнату (только admin)
+```bash
+curl -X POST http://127.0.0.1:8080/rooms/create \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <ADMIN_TOKEN>' \
+  -d '{"name":"Atlas","description":"Переговорка на 6 человек","capacity":6}'
+```
+
+#### 5. Получить список комнат
+```bash
+curl http://127.0.0.1:8080/rooms/list \
+  -H 'Authorization: Bearer <USER_OR_ADMIN_TOKEN>'
+```
+
+#### 6. Создать расписание для комнаты (только admin)
+```bash
+curl -X POST http://127.0.0.1:8080/rooms/<ROOM_ID>/schedule/create \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <ADMIN_TOKEN>' \
+  -d '{"daysOfWeek":[1,2,3,4,5],"startTime":"09:00","endTime":"18:00"}'
+```
+
+`daysOfWeek` — это дни недели от `1` до `7`.
+
+#### 7. Получить слоты на дату
+```bash
+curl 'http://127.0.0.1:8080/rooms/<ROOM_ID>/slots/list?date=2026-04-03' \
+  -H 'Authorization: Bearer <USER_TOKEN>'
+```
+
+#### 8. Создать бронь
+```bash
+curl -X POST http://127.0.0.1:8080/bookings/create \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <USER_TOKEN>' \
+  -d '{"slotId":"<SLOT_ID>","createConferenceLink":true}'
+```
+
+#### 9. Посмотреть свои брони
+```bash
+curl http://127.0.0.1:8080/bookings/my \
+  -H 'Authorization: Bearer <USER_TOKEN>'
+```
+
+#### 10. Посмотреть общий список броней (только admin)
+```bash
+curl 'http://127.0.0.1:8080/bookings/list?page=1&pageSize=20' \
+  -H 'Authorization: Bearer <ADMIN_TOKEN>'
+```
+
+#### 11. Отменить бронь
+```bash
+curl -X POST http://127.0.0.1:8080/bookings/<BOOKING_ID>/cancel \
+  -H 'Authorization: Bearer <USER_TOKEN>'
+```
+
+## Практическая памятка
+Если нужно быстро понять, что сервис жив и база подключена:
+
+```bash
+cd /home/timur/.openclaw/workspace/projects/room-booking-service-go
+docker compose up --build -d
+curl http://127.0.0.1:8080/_info
+```
+
+Если `status=ok` и `databaseOk=true`, backend поднят правильно.
 
 ## Архитектурная логика и rationale
 Проект сознательно сделан как один Go backend service без микросервисной сложности.
