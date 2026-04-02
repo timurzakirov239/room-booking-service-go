@@ -7,14 +7,17 @@ import (
 )
 
 const (
-	defaultHTTPPort = "8080"
+	defaultHTTPPort   = "8080"
+	defaultJWTIssuer  = "room-booking-service-go"
 )
 
 type Config struct {
-	AppEnv          string
-	HTTPPort        string
-	DatabaseURL     string
+	AppEnv           string
+	HTTPPort         string
+	DatabaseURL      string
 	DatabaseMaxConns int32
+	JWTSecret        string
+	JWTIssuer        string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -22,6 +25,8 @@ func LoadFromEnv() (Config, error) {
 		AppEnv:      getEnv("APP_ENV", "development"),
 		HTTPPort:    getEnv("HTTP_PORT", defaultHTTPPort),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+		JWTSecret:   getEnv("JWT_SECRET", "dev-secret-change-me"),
+		JWTIssuer:   getEnv("JWT_ISSUER", defaultJWTIssuer),
 	}
 
 	maxConns, err := getEnvInt32("DATABASE_MAX_CONNS", 4)
