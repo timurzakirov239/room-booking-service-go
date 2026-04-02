@@ -34,6 +34,52 @@ func (r *bookingsRepo) GetByID(ctx context.Context, id string) (repo.Booking, er
 	return scanBooking(row)
 }
 
+func (r *bookingsRepo) List(ctx context.Context, params repo.ListBookingsParams) ([]repo.Booking, int, error) {
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	offset := (page - 1) * pageSize
+
+	countRow := r.queries.queryRow(ctx, `SELECT COUNT(*) FROM bookings`)
+	var total int
+	if err := countRow.Scan(&total); err != nil {
+		return nil, 0, normalizeError(err)
+	}
+
+	rows, err := r.queries.query(ctx, `
+		SELECT id, slot_id, user_id, status, conference_link, created_at
+		FROM bookings
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1 OFFSET $2
+	`, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	items := make([]repo.Booking, 0)
+	for rows.Next() {
+		item, err := scanBooking(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return items, total, nil
+}
+
 func (r *bookingsRepo) ListByUser(ctx context.Context, params repo.ListBookingsByUserParams) ([]repo.Booking, error) {
 	baseSQL := `
 		SELECT b.id, b.slot_id, b.user_id, b.status, b.conference_link, b.created_at

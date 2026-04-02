@@ -43,9 +43,26 @@ func (s BookingService) ListMy(ctx context.Context, actor Actor) ([]repo.Booking
 	})
 }
 
+type ListBookingsInput struct {
+	Actor    Actor
+	Page     int
+	PageSize int
+}
+
 type CancelBookingInput struct {
 	Actor     Actor
 	BookingID string
+}
+
+func (s BookingService) List(ctx context.Context, input ListBookingsInput) ([]repo.Booking, int, error) {
+	if input.Actor.Role != domain.RoleAdmin {
+		return nil, 0, domain.ErrUserRoleNotAllowed
+	}
+
+	return s.Bookings.List(ctx, repo.ListBookingsParams{
+		Page:     input.Page,
+		PageSize: input.PageSize,
+	})
 }
 
 func (s BookingService) Create(ctx context.Context, input CreateBookingInput) (repo.Booking, error) {

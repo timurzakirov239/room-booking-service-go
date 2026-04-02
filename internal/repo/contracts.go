@@ -98,6 +98,11 @@ type ListBookingsByUserParams struct {
 	From   *time.Time
 }
 
+type ListBookingsParams struct {
+	Page     int
+	PageSize int
+}
+
 type UsersRepository interface {
 	Create(context.Context, CreateUserParams) (User, error)
 	GetByID(context.Context, string) (User, error)
@@ -124,6 +129,7 @@ type SlotsRepository interface {
 type BookingsRepository interface {
 	Create(context.Context, CreateBookingParams) (Booking, error)
 	GetByID(context.Context, string) (Booking, error)
+	List(context.Context, ListBookingsParams) ([]Booking, int, error)
 	ListByUser(context.Context, ListBookingsByUserParams) ([]Booking, error)
 	Cancel(context.Context, string) (Booking, error)
 }
