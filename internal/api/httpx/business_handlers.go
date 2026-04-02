@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,12 @@ type createRoomRequest struct {
 	Capacity    *int32  `json:"capacity"`
 }
 
+type createScheduleRequest struct {
+	DaysOfWeek []int16 `json:"daysOfWeek"`
+	StartTime  string  `json:"startTime"`
+	EndTime    string  `json:"endTime"`
+}
+
 type createBookingRequest struct {
 	SlotID               string `json:"slotId"`
 	CreateConferenceLink bool   `json:"createConferenceLink"`
@@ -33,7 +40,7 @@ func handleRoomsList(deps RouterDependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
+		writeJSON(w, http.StatusOK, map[string]any{"rooms": mapRooms(rooms)})
 	})
 }
 
@@ -59,7 +66,7 @@ func handleRoomsCreate(deps RouterDependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusCreated, map[string]any{"room": room})
+		writeJSON(w, http.StatusCreated, map[string]any{"room": mapRoom(room)})
 	})
 }
 
@@ -107,7 +114,7 @@ func handleBookingsCreate(deps RouterDependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusCreated, map[string]any{"booking": booking})
+		writeJSON(w, http.StatusCreated, map[string]any{"booking": mapBooking(booking)})
 	})
 }
 
@@ -129,7 +136,7 @@ func handleBookingsMy(deps RouterDependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"bookings": bookings})
+		writeJSON(w, http.StatusOK, map[string]any{"bookings": mapBookings(bookings)})
 	})
 }
 
@@ -163,7 +170,126 @@ func handleBookingsCancel(deps RouterDependencies) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"booking": booking})
+		writeJSON(w, http.StatusOK, map[string]any{"booking": mapBooking(booking)})
+	})
+}
+
+func handleScheduleCreate(deps RouterDependencies) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		roomID := strings.TrimSpace(r.PathValue("roomId"))
+		if roomID == "" {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "roomId is required")
+			return
+		}
+
+		var input createScheduleRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+			return
+		}
+
+		schedule, err := deps.ScheduleService.Create(r.Context(), app.CreateScheduleInput{
+			RoomID:     roomID,
+			DaysOfWeek: input.DaysOfWeek,
+			StartTime:  strings.TrimSpace(input.StartTime),
+			EndTime:    strings.TrimSpace(input.EndTime),
+		})
+		if err != nil {
+			switch {
+			case errors.Is(err, repo.ErrNotFound):
+				writeAPIError(w, http.StatusNotFound, "ROOM_NOT_FOUND", "room not found")
+			case errors.Is(err, repo.ErrConflict):
+				writeAPIError(w, http.StatusConflict, "SCHEDULE_EXISTS", "schedule for this room already exists and cannot be changed")
+			case errors.Is(err, domain.ErrInvalidTimeRange):
+				writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid schedule time range")
+			default:
+				writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create schedule")
+			}
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]any{"schedule": mapSchedule(schedule)})
+	})
+}
+
+func handleSlotsList(deps RouterDependencies) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		roomID := strings.TrimSpace(r.PathValue("roomId"))
+		if roomID == "" {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "roomId is required")
+			return
+		}
+
+		dateRaw := strings.TrimSpace(r.URL.Query().Get("date"))
+		if dateRaw == "" {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "date is required")
+			return
+		}
+		date, err := time.Parse("2006-01-02", dateRaw)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid date")
+			return
+		}
+
+		slots, err := deps.SlotService.ListAvailableByRoomAndDate(r.Context(), roomID, date)
+		if err != nil {
+			if errors.Is(err, repo.ErrNotFound) {
+				writeAPIError(w, http.StatusNotFound, "ROOM_NOT_FOUND", "room not found")
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list slots")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"slots": mapSlots(slots)})
+	})
+}
+
+func handleBookingsList(deps RouterDependencies) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := 1
+		pageSize := 20
+		if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 {
+				writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid page")
+				return
+			}
+			page = value
+		}
+		if raw := strings.TrimSpace(r.URL.Query().Get("pageSize")); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > 100 {
+				writeAPIError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid pageSize")
+				return
+			}
+			pageSize = value
+		}
+
+		claims, ok := platformauth.ClaimsFromContext(r.Context())
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing auth context")
+			return
+		}
+
+		bookings, total, err := deps.BookingService.List(r.Context(), app.ListBookingsInput{
+			Actor:    app.Actor{UserID: claims.UserID, Role: claims.Role},
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			if errors.Is(err, domain.ErrUserRoleNotAllowed) {
+				writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "forbidden")
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list bookings")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"bookings": mapBookings(bookings),
+			"pagination": paginationDTO{Page: page, PageSize: pageSize, Total: total},
+		})
 	})
 }
 

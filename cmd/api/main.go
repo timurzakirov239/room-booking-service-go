@@ -51,25 +51,37 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	roomService := app.RoomService{Rooms: store.Rooms}
+	materializer := app.SlotMaterializer{Slots: store.Slots}
+	scheduleService := app.ScheduleService{
+		Rooms:     store.Rooms,
+		Schedules: store.Schedules,
+	}
+	slotService := app.SlotService{
+		Rooms:        store.Rooms,
+		Schedules:    store.Schedules,
+		Slots:        store.Slots,
+		Materializer: materializer,
+	}
 	bookingService := app.BookingService{
 		Users:    store.Users,
 		Slots:    store.Slots,
 		Bookings: store.Bookings,
 		Now:      timeutil.NowUTC,
 	}
-	materializer := app.SlotMaterializer{Slots: store.Slots}
 
 	handler := httpx.NewRouter(httpx.RouterDependencies{
-		BuildVersion:   buildVersion,
-		Now:            timeutil.NowUTC,
+		BuildVersion:    buildVersion,
+		Now:             timeutil.NowUTC,
 		DBPing: func(ctx context.Context) error {
 			return pool.Ping(ctx)
 		},
-		AuthSigner:     authSigner,
-		Store:          store,
-		RoomService:    roomService,
-		BookingService: bookingService,
-		Materializer:   materializer,
+		AuthSigner:      authSigner,
+		Store:           store,
+		RoomService:     roomService,
+		ScheduleService: scheduleService,
+		SlotService:     slotService,
+		BookingService:  bookingService,
+		Materializer:    materializer,
 	})
 
 	server := &http.Server{
