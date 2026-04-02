@@ -27,6 +27,9 @@ func TestLoadFromEnvUsesDefaultsAndRequiredDatabaseURL(t *testing.T) {
 	if cfg.DatabaseMaxConns != 4 {
 		t.Fatalf("DatabaseMaxConns = %d, want 4", cfg.DatabaseMaxConns)
 	}
+	if !cfg.AutoMigrate {
+		t.Fatal("AutoMigrate = false, want true")
+	}
 	if cfg.HTTPListenAddress() != ":8080" {
 		t.Fatalf("HTTPListenAddress() = %q, want :8080", cfg.HTTPListenAddress())
 	}
@@ -37,6 +40,8 @@ func TestLoadFromEnvRespectsExplicitValues(t *testing.T) {
 	t.Setenv("HTTP_PORT", "9090")
 	t.Setenv("DATABASE_URL", "postgres://custom")
 	t.Setenv("DATABASE_MAX_CONNS", "7")
+
+	t.Setenv("AUTO_MIGRATE", "false")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -51,6 +56,9 @@ func TestLoadFromEnvRespectsExplicitValues(t *testing.T) {
 	}
 	if cfg.DatabaseMaxConns != 7 {
 		t.Fatalf("DatabaseMaxConns = %d, want 7", cfg.DatabaseMaxConns)
+	}
+	if cfg.AutoMigrate {
+		t.Fatal("AutoMigrate = true, want false")
 	}
 }
 

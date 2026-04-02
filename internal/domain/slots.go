@@ -42,9 +42,9 @@ func BuildRollingSlotWindows(daysOfWeek []int16, startTime time.Time, endTime ti
 			return nil, ErrInvalidTimeRange
 		}
 
-		for slotStart := windowStart; slotStart.Add(SlotDuration) <= windowEnd; slotStart = slotStart.Add(SlotDuration) {
+		for slotStart := windowStart; !slotStart.Add(SlotDuration).After(windowEnd); slotStart = slotStart.Add(SlotDuration) {
 			slotEnd := slotStart.Add(SlotDuration)
-			if slotEnd <= fromUTC || !slotStart.Before(toUTC) {
+			if !slotEnd.After(fromUTC) || !slotStart.Before(toUTC) {
 				continue
 			}
 			windows = append(windows, SlotWindow{StartAt: slotStart, EndAt: slotEnd})

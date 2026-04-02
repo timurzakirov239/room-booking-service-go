@@ -15,14 +15,20 @@
 ## Текущий статус
 В репозитории уже собраны основные Slice-слои:
 - bootstrap/config/docker foundation;
-- начальная PostgreSQL schema/migration;
+- PostgreSQL schema/migration;
 - repository layer;
 - domain/application logic для materialized slots и booking rules;
 - dummy auth + JWT + role middleware;
 - router/handler wiring;
 - router-level tests/scenario coverage для текущей формы приложения.
 
-Это состояние близко к implementation-ready, но финальная runnable validation в текущем runtime ограничена отсутствием `go` и `docker`.
+На 2026-04-02 в этом runtime уже подтверждено:
+- `go mod tidy` проходит;
+- `go test ./...` проходит;
+- `go build ./...` проходит;
+- `docker compose config` проходит.
+
+Неподтверждённой остаётся только живая DB-backed runtime validation (`docker compose up --build` / `curl /_info`), потому что текущий runtime не имеет доступа к Docker daemon socket.
 
 ## Явный путь запуска
 Предполагаемый локальный run path в нормальном Go/Docker runtime:
@@ -87,53 +93,53 @@ make migrate-down
 - `db/migrations` — schema evolution.
 
 ## Что уже реализовано по текущему shape
-Доступно и/или частично реализовано:
+Реализованы и покрыты текущими сценарными тестами:
 - `GET /_info`
 - `POST /dummyLogin`
 - `GET /rooms/list`
 - `POST /rooms/create`
+- `POST /rooms/{roomId}/schedule/create`
+- `GET /rooms/{roomId}/slots/list`
 - `POST /bookings/create`
+- `GET /bookings/list`
 - `GET /bookings/my`
 - `POST /bookings/{bookingId}/cancel`
 
-Часть route shape всё ещё scaffold-level:
-- `POST /rooms/{roomId}/schedule/create`
-- `GET /rooms/{roomId}/slots/list`
-- `GET /bookings/list`
-
 ## Верификация, реально доступная в текущем runtime
-В этом runtime было подтверждено только следующее:
+В этом runtime подтверждено следующее:
 - `repo_access: yes`
-- `go_available: no`
-- `docker_available: no`
-- `compose_available: no`
+- `go_available: yes`
+- `docker_available: yes`
+- `compose_available: yes`
+- `go test ./...`: green
+- `go build ./...`: green
+- `docker compose config`: green
 
-Следствие:
-- `go test ./...` здесь не запускался, потому что `go` недоступен;
-- `go build ./...` здесь не запускался, потому что `go` недоступен;
-- `docker compose up --build` здесь не запускался, потому что `docker`/`compose` недоступны.
+Не подтверждено только следующее:
+- `docker compose up --build`: blocked by Docker daemon socket permissions (`/var/run/docker.sock`)
+- живой `curl http://localhost:8080/_info`: pending после запуска контейнеров или локального PostgreSQL
 
 ## Известные блокеры / ограничения
-1. **Runtime/toolchain blocker**
-   - В текущем окружении отсутствуют `go`, `docker` и `docker compose`.
-   - Поэтому нельзя честно подтвердить compile/run/integration readiness прямо здесь.
+1. **DB-backed integration verification pending**
+   - compile/test/build уровень уже подтверждён, но живой прогон приложения с PostgreSQL ещё не подтверждён.
 
-2. **Не полностью завершённые endpoint slices**
-   - schedule create / slots list / admin bookings list пока не доведены до полной business-complete реализации.
+2. **Docker runtime permission blocker**
+   - `docker compose up --build` в текущем runtime блокируется правами на Docker daemon socket.
+   - Это не compile blocker, а permission blocker окружения.
 
-3. **DB-backed integration verification pending**
-   - Router-level tests и сценарные проверки добавлены в кодовую базу, но фактический прогон против реального Go/PostgreSQL runtime остаётся следующим шагом.
-
-4. **Push blocker**
-   - Push в origin в этом runtime остаётся заблокирован отсутствием GitHub credentials.
+3. **Push status нужно перепроверить отдельно**
+   - ветка сейчас синхронна с `origin/main`, но после новых локальных изменений следующий `git push` ещё не выполнялся.
 
 ## Ближайший честный следующий шаг
-В окружении с установленными Go и Docker выполнить:
+1. Поднять живой runtime одним из двух путей:
 ```bash
-go test ./...
-go build ./...
 docker compose up --build
 curl http://localhost:8080/_info
 ```
+или, если есть локальный PostgreSQL без Docker:
+```bash
+go run ./cmd/api
+curl http://localhost:8080/_info
+```
 
-После этого можно закрывать compile/runtime verification и добивать оставшиеся scaffold-level endpoints.
+2. После smoke-check обновить `docs/project/STATUS.md`, закоммитить изменения и сделать `git push`.

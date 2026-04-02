@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"room-booking-service-go/internal/api/httpx"
 	"room-booking-service-go/internal/app"
 	"room-booking-service-go/internal/config"
@@ -39,7 +41,13 @@ func run(ctx context.Context, args []string) error {
 	defer pool.Close()
 
 	if len(args) > 0 {
-		return runMigrations(ctx, cfg, args)
+		return runMigrations(ctx, pool, cfg, args)
+	}
+
+	if cfg.AutoMigrate {
+		if err := postgres.Bootstrap(ctx, pool); err != nil {
+			return err
+		}
 	}
 
 	store := postgres.NewStore(pool)
@@ -70,8 +78,8 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	handler := httpx.NewRouter(httpx.RouterDependencies{
-		BuildVersion:    buildVersion,
-		Now:             timeutil.NowUTC,
+		BuildVersion: buildVersion,
+		Now:          timeutil.NowUTC,
 		DBPing: func(ctx context.Context) error {
 			return pool.Ping(ctx)
 		},
@@ -99,17 +107,16 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runMigrations(ctx context.Context, cfg config.Config, args []string) error {
+func runMigrations(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, args []string) error {
 	if len(args) < 2 || args[0] != "migrate" {
 		return fmt.Errorf("unsupported command")
 	}
 
 	action := args[1]
-	if action != "up" && action != "down" {
+	if action != "up" {
 		return fmt.Errorf("unsupported migrate action: %s", action)
 	}
 
-	slog.Info("migration scaffold invoked", "action", action, "database_url_set", cfg.DatabaseURL != "")
-	_ = ctx
-	return nil
+	slog.Info("running migrations", "action", action, "database_url_set", cfg.DatabaseURL != "")
+	return postgres.Bootstrap(ctx, pool)
 }

@@ -191,7 +191,15 @@ func (f *fakeRoomsRepo) Create(_ context.Context, _ repo.CreateRoomParams) (repo
 	return f.createResult, f.createErr
 }
 
-func (f *fakeRoomsRepo) GetByID(_ context.Context, _ string) (repo.Room, error) {
+func (f *fakeRoomsRepo) GetByID(_ context.Context, id string) (repo.Room, error) {
+	for _, item := range f.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	if f.createResult.ID == id {
+		return f.createResult, nil
+	}
 	return repo.Room{}, repo.ErrNotFound
 }
 
@@ -219,10 +227,23 @@ func (f *fakeUsersRepo) GetByEmail(_ context.Context, _ string) (repo.User, erro
 type fakeSlotsRepo struct {
 	slot repo.Slot
 	err error
+	items []repo.Slot
+	createErr error
 }
 
-func (f *fakeSlotsRepo) Create(_ context.Context, _ repo.CreateSlotParams) (repo.Slot, error) {
-	return repo.Slot{}, nil
+func (f *fakeSlotsRepo) Create(_ context.Context, params repo.CreateSlotParams) (repo.Slot, error) {
+	if f.createErr != nil {
+		return repo.Slot{}, f.createErr
+	}
+	created := repo.Slot{
+		ID:         "slot-created",
+		RoomID:     params.RoomID,
+		ScheduleID: params.ScheduleID,
+		StartAt:    params.StartAt,
+		EndAt:      params.EndAt,
+	}
+	f.items = append(f.items, created)
+	return created, nil
 }
 
 func (f *fakeSlotsRepo) GetByID(_ context.Context, _ string) (repo.Slot, error) {
@@ -230,17 +251,33 @@ func (f *fakeSlotsRepo) GetByID(_ context.Context, _ string) (repo.Slot, error) 
 }
 
 func (f *fakeSlotsRepo) ListByRoomAndRange(_ context.Context, _ repo.ListSlotsParams) ([]repo.Slot, error) {
-	return nil, nil
+	return f.items, nil
 }
 
 type fakeBookingsRepo struct {
 	created repo.Booking
 	createErr error
 	items []repo.Booking
+	listTotal int
 	getByID repo.Booking
 	getByIDErr error
 	cancelled repo.Booking
 	cancelErr error
+}
+
+type fakeSchedulesRepo struct {
+	created repo.Schedule
+	createErr error
+	getByRoom repo.Schedule
+	getByRoomErr error
+}
+
+func (f *fakeSchedulesRepo) Create(_ context.Context, _ repo.CreateScheduleParams) (repo.Schedule, error) {
+	return f.created, f.createErr
+}
+
+func (f *fakeSchedulesRepo) GetByRoomID(_ context.Context, _ string) (repo.Schedule, error) {
+	return f.getByRoom, f.getByRoomErr
 }
 
 func (f *fakeBookingsRepo) Create(_ context.Context, _ repo.CreateBookingParams) (repo.Booking, error) {
@@ -249,6 +286,14 @@ func (f *fakeBookingsRepo) Create(_ context.Context, _ repo.CreateBookingParams)
 
 func (f *fakeBookingsRepo) GetByID(_ context.Context, _ string) (repo.Booking, error) {
 	return f.getByID, f.getByIDErr
+}
+
+func (f *fakeBookingsRepo) List(_ context.Context, _ repo.ListBookingsParams) ([]repo.Booking, int, error) {
+	total := f.listTotal
+	if total == 0 {
+		total = len(f.items)
+	}
+	return f.items, total, nil
 }
 
 func (f *fakeBookingsRepo) ListByUser(_ context.Context, _ repo.ListBookingsByUserParams) ([]repo.Booking, error) {
@@ -296,22 +341,105 @@ func TestRoomsCreateAndListScenario(t *testing.T) {
 	}
 }
 
-func TestScheduleCreateRouteRemainsAuthorizedScaffold(t *testing.T) {
+func TestScheduleCreateScenario(t *testing.T) {
 	adminSigner := platformauth.Signer{Secret: "test-secret", Lifetime: time.Hour}
 	adminToken, err := adminSigner.Sign(platformauth.Claims{UserID: platformauth.DummyAdminUserID, Role: domain.RoleAdmin})
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
 
-	handler := NewRouter(RouterDependencies{AuthSigner: adminSigner})
+	createdRoom := repo.Room{ID: "room-1", Name: "Atlas"}
+	createdSchedule := repo.Schedule{
+		ID:         "schedule-1",
+		RoomID:     "room-1",
+		DaysOfWeek: []int16{1},
+		StartTime:  time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC),
+		EndTime:    time.Date(0, 1, 1, 10, 0, 0, 0, time.UTC),
+	}
+	roomsRepo := &fakeRoomsRepo{items: []repo.Room{createdRoom}}
+	schedulesRepo := &fakeSchedulesRepo{created: createdSchedule}
+
+	handler := NewRouter(RouterDependencies{
+		AuthSigner: adminSigner,
+		ScheduleService: app.ScheduleService{
+			Rooms:     roomsRepo,
+			Schedules: schedulesRepo,
+		},
+	})
 	req := httptest.NewRequest(http.MethodPost, "/rooms/room-1/schedule/create", bytes.NewBufferString(`{"daysOfWeek":[1],"startTime":"09:00","endTime":"10:00"}`))
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	res := httptest.NewRecorder()
 
 	handler.ServeHTTP(res, req)
 
-	if res.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501", res.Code)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", res.Code)
+	}
+}
+
+func TestSlotsListScenario(t *testing.T) {
+	userSigner := platformauth.Signer{Secret: "test-secret", Lifetime: time.Hour}
+	userToken, err := userSigner.Sign(platformauth.Claims{UserID: platformauth.DummyUserUserID, Role: domain.RoleUser})
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	room := repo.Room{ID: "room-1", Name: "Atlas"}
+	schedule := repo.Schedule{
+		ID:         "schedule-1",
+		RoomID:     "room-1",
+		DaysOfWeek: []int16{5},
+		StartTime:  time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC),
+		EndTime:    time.Date(0, 1, 1, 10, 0, 0, 0, time.UTC),
+	}
+	slotsRepo := &fakeSlotsRepo{}
+
+	handler := NewRouter(RouterDependencies{
+		AuthSigner: userSigner,
+		SlotService: app.SlotService{
+			Rooms:        &fakeRoomsRepo{items: []repo.Room{room}},
+			Schedules:    &fakeSchedulesRepo{getByRoom: schedule},
+			Slots:        slotsRepo,
+			Materializer: app.SlotMaterializer{Slots: slotsRepo},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/rooms/room-1/slots/list?date=2026-04-03", nil)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.Code)
+	}
+}
+
+func TestBookingsListScenario(t *testing.T) {
+	adminSigner := platformauth.Signer{Secret: "test-secret", Lifetime: time.Hour}
+	adminToken, err := adminSigner.Sign(platformauth.Claims{UserID: platformauth.DummyAdminUserID, Role: domain.RoleAdmin})
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	booking := repo.Booking{ID: "booking-1", SlotID: "slot-1", UserID: platformauth.DummyUserUserID, Status: domain.BookingStatusActive}
+	bookingRepo := &fakeBookingsRepo{items: []repo.Booking{booking}, listTotal: 1}
+
+	handler := NewRouter(RouterDependencies{
+		AuthSigner: adminSigner,
+		BookingService: app.BookingService{
+			Bookings: bookingRepo,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/bookings/list?page=1&pageSize=20", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.Code)
 	}
 }
 
